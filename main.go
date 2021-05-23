@@ -1,6 +1,7 @@
 package main
 
 import (
+	"html/template"
 	"encoding/json"
 	"io"
 	"log"
@@ -11,45 +12,16 @@ import (
 	"time"
 )
 
-//Define a map to implement routing table.
-var mux map[string]func(http.ResponseWriter, *http.Request)
+/**
+ * constants
+ */
+const PROGNAME = "tiger"
+const PROGVER = "v0.1.0"
 
-func main() {
-	server := http.Server{
-		Addr:        ":8080",
-		Handler:     &myHandler{},
-		ReadTimeout: 5 * time.Second,
-	}
-
-	mux = make(map[string]func(http.ResponseWriter, *http.Request))
-	mux["/"] = IndexHandler
-	mux["/static"] = StaticHandler
-	mux["/version"] = VersionHandler
-	mux["/headers"] = HeadersHandler
-	mux["/environ"] = EnvironHandler
-	mux["/memory"] = MemoryHandler
-	err := server.ListenAndServe()
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func writeJSON(w http.ResponseWriter, v interface{}) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	e := json.NewEncoder(w)
-	e.SetIndent("", "  ")
-	return e.Encode(v)
-}
-
-type ResponseError struct {
-	Code        int    `json:"code"`
-	Message     string `json:"message"`
-	HttpCode    int    `json:"httpcode"`
-	HttpMessage string `json:"httpmessage"`
-}
-
-type errorResponse struct {
+/**
+ * reponse types
+ */
+type responseError struct {
 	Error errObj `json:"error"`
 }
 
@@ -57,37 +29,21 @@ type errObj struct {
 	Message string `json:"message"`
 }
 
-type headersResponse struct {
+type responseHeaders struct {
 	Headers map[string]string `json:"headers"`
 }
 
-type environResponse struct {
+type responseEnviron struct {
 	Environment map[string]string `json:"environment"`
 }
 
-func writeErrorJSON(w http.ResponseWriter, err error) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusInternalServerError)
-	w.WriteHeader(http.StatusInternalServerError)
-	_ = writeJSON(w, errorResponse{errObj{err.Error()}}) // ignore error, can't do anything
+type responseCookies struct {
+	Environment map[string]string `json:"cookies"`
 }
 
-func getHeaders(r *http.Request) map[string]string {
-	hdr := make(map[string]string, len(r.Header))
-	for k, v := range r.Header {
-		hdr[k] = v[0]
-	}
-	return hdr
-}
-
-func getCookies(cs []*http.Cookie) map[string]string {
-	m := make(map[string]string, len(cs))
-	for _, v := range cs {
-		m[v.Name] = v.Value
-	}
-	return m
-}
-
+/**
+ * myHandler structure that implements the routing
+ */
 type myHandler struct{}
 
 func (*myHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -98,10 +54,43 @@ func (*myHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	io.WriteString(w, "URL: "+r.URL.String())
+	host, _ := os.Hostname()
+	io.WriteString(w, "HOSTNAME: "+host)
 }
 
+/**
+ * request handler
+ */
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
-	io.WriteString(w, "may the force be with you!")
+	const tpl = `
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<title>{{ .Title }}</title>
+	</head>
+	<body>
+<h2>{{ .Title }}</h2>
+<h4>Endpoints:</h2>
+<ul>
+{{ range $key, $value := .Items }}
+   <li><a href="{{ $key }}">{{ $key }}</a></li>
+{{ end }}
+</ul>
+	</body>
+</html>`
+
+	t, _ := template.New("index").Parse(tpl)
+
+	data := struct {
+		Title string
+		Items map[string]func(http.ResponseWriter, *http.Request)
+	}{
+		Title: PROGNAME,
+		Items: mux,
+	}
+
+	_ = t.Execute(w, data)
 }
 
 func StaticHandler(w http.ResponseWriter, r *http.Request) {
@@ -113,11 +102,17 @@ func StaticHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func VersionHandler(w http.ResponseWriter, r *http.Request) {
-	io.WriteString(w, "tiger v1.0.0")
+	io.WriteString(w, PROGNAME + " " + PROGVER)
 }
 
 func HeadersHandler(w http.ResponseWriter, r *http.Request) {
-	if err := writeJSON(w, headersResponse{getHeaders(r)}); err != nil {
+	if err := writeJSON(w, responseHeaders{getHeaders(r)}); err != nil {
+		writeErrorJSON(w, err)
+	}
+}
+
+func CookiesHandler(w http.ResponseWriter, r *http.Request) {
+	if err := writeJSON(w, responseCookies{getCookies(r.Cookies())}); err != nil {
 		writeErrorJSON(w, err)
 	}
 }
@@ -138,7 +133,7 @@ func EnvironHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	})
 
-	if err := writeJSON(w, environResponse{environment}); err != nil {
+	if err := writeJSON(w, responseEnviron{environment}); err != nil {
 		writeErrorJSON(w, err)
 	}
 }
@@ -151,5 +146,67 @@ func MemoryHandler(w http.ResponseWriter, r *http.Request) {
 	err := profile.WriteTo(w, 1)
 	if err != nil {
 		log.Printf("Error: Failed to write allocs profile: %v", err)
+	}
+}
+
+/**
+ * utility methods
+ */
+func writeJSON(w http.ResponseWriter, v interface{}) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	e := json.NewEncoder(w)
+	e.SetIndent("", "  ")
+	return e.Encode(v)
+}
+
+func writeErrorJSON(w http.ResponseWriter, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusInternalServerError)
+	w.WriteHeader(http.StatusInternalServerError)
+	_ = writeJSON(w, responseError{errObj{err.Error()}}) // ignore error, can't do anything
+}
+
+func getHeaders(r *http.Request) map[string]string {
+	hdr := make(map[string]string, len(r.Header))
+	for k, v := range r.Header {
+		hdr[k] = v[0]
+	}
+	return hdr
+}
+
+func getCookies(cs []*http.Cookie) map[string]string {
+	m := make(map[string]string, len(cs))
+	for _, v := range cs {
+		m[v.Name] = v.Value
+	}
+	return m
+}
+
+/**
+ * program
+ */
+
+//Define a map to implement routing table.
+var mux map[string]func(http.ResponseWriter, *http.Request)
+
+func main() {
+	server := http.Server{
+		Addr:        ":8080",
+		Handler:     &myHandler{},
+		ReadTimeout: 5 * time.Second,
+	}
+
+	mux = make(map[string]func(http.ResponseWriter, *http.Request))
+	mux["/"] = IndexHandler
+	mux["/static"] = StaticHandler
+	mux["/version"] = VersionHandler
+	mux["/headers"] = HeadersHandler
+	mux["/cookies"] = CookiesHandler
+	mux["/environ"] = EnvironHandler
+	mux["/memory"] = MemoryHandler
+	err := server.ListenAndServe()
+	if err != nil {
+		log.Fatal(err)
 	}
 }
