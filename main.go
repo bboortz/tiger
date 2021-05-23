@@ -1,8 +1,8 @@
 package main
 
 import (
-	"html/template"
 	"encoding/json"
+	"html/template"
 	"io"
 	"log"
 	"net/http"
@@ -102,7 +102,7 @@ func StaticHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func VersionHandler(w http.ResponseWriter, r *http.Request) {
-	io.WriteString(w, PROGNAME + " " + PROGVER)
+	io.WriteString(w, PROGNAME+" "+PROGVER)
 }
 
 func HeadersHandler(w http.ResponseWriter, r *http.Request) {
