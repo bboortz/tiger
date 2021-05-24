@@ -6,8 +6,8 @@ tiger is a tiny webserver for testing purposes written in go.
 # Features
 
 * Provides different endpoints for different use-cases
-* Zero Dependencies
-* Available as docker build
+* Zero Dependencies (only golang and go standard libraries)
+* Available as very small docker image: 2.2MB
 
 
 # Endpoints
@@ -23,6 +23,7 @@ tiger is a tiny webserver for testing purposes written in go.
 
 # How to use
 
-* build `make build`
+* build binary `make build`
+* build docker `make build`
 * run `make run`
-* dev & test `make dev`
+* dev & test `make startdev`
